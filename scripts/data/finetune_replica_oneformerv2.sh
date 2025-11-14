@@ -26,11 +26,11 @@ scenes=(room0 room1 office0 office1 office2)
 ##################################################
 CFG=configs/${DATASET}/${EXP}.py
 
-#python src/data/generate_finetune_data_Replica.py \
-#--seed 0 \
-#--result_dir ./data/tmp/generate_nvs_semantic/ \
-#--cfg ${CFG} \
-#--enable_vis 0
+python src/data/generate_finetune_data_Replica.py \
+--seed 0 \
+--result_dir ./data/tmp/generate_nvs_semantic/ \
+--cfg ${CFG} \
+--enable_vis 0
 
 python src/data/finetune_oneformer_ReplicaV2.py \
 --seed 0 \

@@ -8,7 +8,7 @@
 # Input arguments
 scene=${1:-office0}
 num_run=${2:-1}
-EXP=${3:-ActiveLang} # config in configs/{DATASET}/{scene}/{EXP}.py will be loaded
+EXP=${3:-ActiveSem} # config in configs/{DATASET}/{scene}/{EXP}.py will be loaded
 ENABLE_VIS=${4:-0}
 GPU_ID=${5:-0}
 
