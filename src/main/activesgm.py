@@ -39,7 +39,7 @@ from src.visualization import init_visualizer
 
 
 if __name__ == "__main__":
-    info_printer = InfoPrinter("ActiveGAMER")
+    info_printer = InfoPrinter("ActiveSGM")
     timer = Timer()
 
     ##################################################
