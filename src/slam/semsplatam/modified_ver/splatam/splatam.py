@@ -3,12 +3,7 @@ import cv2
 import torch
 import torch.nn.functional as F
 import numpy as np
-import matplotlib.cm as cm
-from plyfile import PlyData, PlyElement
 from torch_sparse.tensor import SparseTensor
-from pytorch3d.ops import knn_points,ball_query
-
-from src.utils.general_utils import create_class_colormap,apply_colormap
 
 from third_parties.splatam.utils.slam_helpers import (
 transformed_params2rendervar,
@@ -21,7 +16,6 @@ import matplotlib.pyplot as plt
 from third_parties.splatam.utils.slam_external import build_rotation
 from third_parties.splatam.utils.gs_external import update_params_and_optimizer, inverse_sigmoid,cat_params_to_optimizer, accumulate_mean2d_gradient
 from diff_gaussian_rasterization import GaussianRasterizer as Renderer
-from channel_rasterization import GaussianRasterizer as SEMRenderer
 from channel_rasterization import GaussianRasterizationSettings as Camera
 from sparse_channel_rasterization import GaussianRasterizer as SEMRenderer_sparse
 from sparse_channel_rasterization import GaussianRasterizationSettings as Camera_sparse
@@ -170,7 +164,6 @@ def initialize_params_with_seman(init_pt_cld, num_frames, mean3_sq_dist, gaussia
     params['cam_trans'] = np.zeros((1, 3, num_frames))
 
     _, topk_indices = torch.topk(params['semantic_logits'], k=TOPK, dim=-1)
-    # values = torch.nn.Parameter(values.cuda().float().contiguous().requires_grad_(True))
     dense_shape = params['semantic_logits'].shape
     seman_sparse = create_differentiable_sparse_tensor(params['semantic_logits'], topk_indices, dense_shape)
 
@@ -266,7 +259,6 @@ def initialize_new_params_with_seman(new_pt_cld, mean3_sq_dist, gaussian_distrib
         'log_scales': log_scales,
     }
     _, topk_indices = torch.topk(params['semantic_logits'], k=TOPK, dim=-1)
-    # values = torch.nn.Parameter(values.cuda().float().contiguous().requires_grad_(True))
     dense_shape = params['semantic_logits'].shape
     seman_sparse = create_differentiable_sparse_tensor(params['semantic_logits'], topk_indices, dense_shape)
 
@@ -300,28 +292,7 @@ def add_new_gaussians_with_seman(params, variables, curr_data, sil_thres,
     depth_error = torch.abs(gt_depth - render_depth) * (gt_depth > 0)
     non_presence_depth_mask = (render_depth > gt_depth) * (depth_error > 50*depth_error.median())
 
-    # # Check also the semantic label
-    # with torch.no_grad():
-    #     seen = torch.ones(size=(params['means3D'].shape[0],),dtype=torch.bool).to(render_depth.device)
-    #     seman_rendervar = transformed_params2semrendervar_sparse(params, transformed_gaussians, seen)
-    #     sparse_cam = set_camera_sparse(cam=curr_data['cam'], cls_ids=variables['seman_cls_ids'])
-    #     seman_im, _, = SEMRenderer_sparse(raster_settings=sparse_cam)(**seman_rendervar)
-    #
-    #     _, pseudo_cls_ids = torch.topk(curr_data['seman'], 16, dim=0)
-    #     _, render_cls_ids = torch.topk(seman_im, 16, dim=0)
-    #
-    #     MAX_CLS = seman_im.shape[0]
-    #
-    #     pseudo_onehot = F.one_hot(pseudo_cls_ids.clone(), MAX_CLS).permute(1, 2, 3, 0).sum(dim=-1).clamp(max=1)
-    #     render_onehot = F.one_hot(render_cls_ids.clone(), MAX_CLS).permute(1, 2, 3, 0).sum(dim=-1).clamp(max=1)
-    #
-    #     intersection = (pseudo_onehot * render_onehot).sum(dim=-1)
-    #
-    #     overlap_rate = intersection / 16
-    #     non_presence_semantic_mask = overlap_rate < 0.5
-
     # Determine non-presence mask
-    # non_presence_mask = non_presence_sil_mask | non_presence_depth_mask | non_presence_semantic_mask
     non_presence_mask = non_presence_sil_mask | non_presence_depth_mask
     # Flatten mask
     non_presence_mask = non_presence_mask.reshape(-1)
@@ -382,18 +353,14 @@ def transformed_params2semrendervar(params, variables, transformed_gaussians, se
     return rendervar
 
 def transformed_params2semrendervar_sparse(params, transformed_gaussians, seen):
-    # if seen==None:
-    #     seen = torch.ones(size=(params['log_scales'].shape[0],), dtype=torch.bool)
     if params['log_scales'].shape[1] == 1:
         log_scales = torch.tile(params['log_scales'][seen], (1, 3))
     else:
         log_scales = params['log_scales'][seen]
 
     # Initialize Render Variables
-    ### TODO: check if semantic loss can only working on semantic logits
     rendervar = {
         'means3D': transformed_gaussians['means3D'][seen].detach(),
-        # 'colors_precomp': seman_sparse.to_dense()[seen],
         'colors_precomp': params['semantic_logits'][seen],
         'rotations': F.normalize(transformed_gaussians['unnorm_rotations'][seen]).detach(),
         'opacities': torch.sigmoid(params['logit_opacities'][seen]).detach(),
@@ -542,13 +509,9 @@ def get_loss_with_seman(params, curr_data, variables, iter_time_idx, loss_weight
     uncertainty = uncertainty.detach()
 
     # Semantic Rendering
-    #seman_rendervar = transformed_params2semrendervar(params, variables, transformed_gaussians, seen)
-    #seman_im, _, = SEMRenderer(raster_settings=curr_data['cam'])(**seman_rendervar)  # 133.H.W
     seman_rendervar = transformed_params2semrendervar_sparse(params, transformed_gaussians, seen)
     sparse_cam = set_camera_sparse(cam=curr_data['cam'],cls_ids=variables['seman_cls_ids'])
-    # seman_rendervar['means2D'].retain_grad()
     seman_im, _, = SEMRenderer_sparse(raster_settings=sparse_cam)(**seman_rendervar)
-    # variables['means2D'][seen] = (variables['means2D'][seen]+seman_rendervar['means2D'])/2
 
     # Mask with valid depth values (accounts for outlier depth values)
     nan_mask = (~torch.isnan(depth)) & (~torch.isnan(uncertainty))
@@ -596,7 +559,6 @@ def get_loss_with_seman(params, curr_data, variables, iter_time_idx, loss_weight
              seman_im = seman_im[:,curr_data['crop_mask']]
              seman_pseudo = curr_data['seman'][:, curr_data['crop_mask']]
              losses['seman'] = lambda_hel * calc_hellinger_distance(pred_dist=seman_im, target_dist=seman_pseudo) + lambda_cosine * (1 - calc_cosine(seman_pseudo, seman_im, dim=0))
-             #losses['seman'] = lambda_hel * calc_kl(pred_dist=seman_im,target_dist=seman_pseudo) + lambda_cosine * (1 - calc_cosine(seman_pseudo, seman_im, dim=0))
         else:
             losses['seman'] = lambda_hel * calc_hellinger_distance(pred_dist=seman_im,target_dist=curr_data['seman']) + lambda_cosine *(1-calc_cosine(curr_data['seman'],seman_im,dim=0))
             #losses['seman'] = lambda_hel * calc_kl(pred_dist=seman_im,target_dist=curr_data['seman']) + lambda_cosine * (1 - calc_cosine(curr_data['seman'], seman_im, dim=0))
@@ -676,63 +638,8 @@ def prune_gaussians_w_semantic(params, variables, optimizer, iter, prune_dict, k
                 big_points_ws = torch.exp(params['log_scales']).max(dim=1).values > 0.1 * variables['scene_radius']
                 to_remove = torch.logical_or(to_remove, big_points_ws)
 
-            # ### refer to pointNet++
-            # prob_sum = params['semantic_logits'].sum(dim=-1)
-            # to_remove_prob = (prob_sum < 0.1)
-            # to_remove = torch.logical_or(to_remove, to_remove_prob)
 
             params, variables = remove_points(to_remove, params, variables, optimizer)
-
-
-
-            # max_prob = params['semantic_logits'].max(dim=-1).values
-            # to_replace_prob = (prob_sum < 0.2) & (max_prob < 0.1)
-            # # to_replace_prob = (prob_sum < 0.5)
-            # # non_new_added = torch.abs(variables['timestep'] - iter) > prune_dict['prune_every']
-            # to_remove_semantic = (to_remove_entropy | to_remove_prob) & non_new_added
-            # # to_replace_semantic = to_replace_prob & non_new_added
-            # to_replace_semantic = to_replace_prob
-            #
-            # if to_replace_semantic.sum()>0:
-            #     print('Replace low confident labels!')
-            #     pts_to_replace = params['means3D'][to_replace_semantic].unsqueeze(0)
-            #     pts_to_vote = params['means3D'][~to_replace_semantic].unsqueeze(0)
-            #     # knn_idxs = ball_query(pts_to_replace, pts_to_vote, K = 10, radius=search_radi).idx.squeeze()
-            #     knn_idxs = knn_points(pts_to_replace, pts_to_vote, K = knn).idx.squeeze()
-            #     knn_labels = variables['seman_cls_ids'][knn_idxs].view(-1, knn*16)
-            #     knn_probs = params['semantic_logits'][knn_idxs].view(-1,knn*16)
-            #
-            #     topk = 16
-            #     num_classes = knn_labels.max().item() + 1
-            #
-            #     M = knn_labels.shape[0]
-            #
-            #     counts = torch.zeros((M, num_classes), device=params['semantic_logits'].device).scatter_add(
-            #         dim=1,
-            #         index=knn_labels,
-            #         src=torch.ones_like(knn_labels, dtype=torch.float)
-            #     )
-            #
-            #     sums = torch.zeros((M, num_classes), device=params['semantic_logits'].device).scatter_add(
-            #         dim=1,
-            #         index=knn_labels,
-            #         src=knn_probs
-            #     )
-            #
-            #     nonzero_mask = counts > 0
-            #     avg_probs = torch.zeros_like(sums)
-            #     avg_probs[nonzero_mask] = sums[nonzero_mask] / counts[nonzero_mask]
-            #
-            #     _, topk_indices =  torch.topk(avg_probs, k=topk, dim=1)
-            #     topk_probs = torch.gather(avg_probs, dim=1, index=topk_indices)
-            #
-            #     # topk_counts, topk_indices = torch.topk(counts, k=topk, dim=1)  # (M, 16)
-            #     # topk_probs = torch.gather(avg_probs, dim=1, index=topk_indices)  # (M, 16)
-            #
-            #     variables['seman_cls_ids'][to_replace_semantic] = topk_indices
-            #     params['semantic_logits'][to_replace_semantic] = topk_probs
-
-            # torch.cuda.empty_cache()
 
         # Reset Opacities for all Gaussians
         if iter > 0 and iter % prune_dict['reset_opacities_every'] == 0 and prune_dict['reset_opacities']:

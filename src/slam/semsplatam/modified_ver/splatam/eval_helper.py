@@ -1,19 +1,13 @@
 import os
 import cv2
-import numpy as np
 import torch
-from audioop import avgpp
 from tqdm import tqdm
 import torch.nn.functional as F
 from pytorch_msssim import ms_ssim
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from imgviz import label_colormap
-import time
 
 from third_parties.splatam.datasets.gradslam_datasets.geometryutils import relative_transformation
-from third_parties.splatam.utils.slam_external import  calc_psnr
-from third_parties.splatam.datasets.gradslam_datasets.geometryutils import relative_transformation
-# from third_parties.splatam.utils.recon_helpers import setup_camera
 from third_parties.splatam.utils.slam_external import build_rotation, calc_psnr
 from third_parties.splatam.utils.slam_helpers import (
     transformed_params2rendervar, transformed_params2depthplussilhouette,
@@ -160,9 +154,6 @@ def eval(slam_model, dataset, final_params, final_variables, num_frames, eval_di
             continue
 
         # Get current frame Gaussians
-        # transformed_gaussians = transform_to_frame(final_params, time_idx, 
-        #                                            gaussians_grad=False, 
-        #                                            camera_grad=False)
         transformed_gaussians = transform_to_frame(final_params, time_idx, 
                                                    gaussians_grad=False, 
                                                    camera_grad=False,
@@ -202,9 +193,6 @@ def eval(slam_model, dataset, final_params, final_variables, num_frames, eval_di
                                     torch.clamp(weighted_gt_im.unsqueeze(0), 0.0, 1.0)).item()
 
         # Render Semantic and compute cosine similarity
-        # seman_rendervar = transformed_params2semrendervar_sparse(final_params, transformed_gaussians, seen)
-        # sparse_cam = set_camera_sparse(cam=curr_data['cam'], cls_ids=final_variables['seman_cls_ids'])
-        # rastered_seman, _, = SEMRenderer(raster_settings=sparse_cam)(**seman_rendervar)
         seman_rendervar = transformed_params2semrendervar(final_params, final_variables, transformed_gaussians, seen)
         rastered_seman, _, = SEMRenderer(raster_settings=curr_data['cam'])(**seman_rendervar)  # 133.H.W
         cosine_score = calc_cosine(curr_data['seman'], rastered_seman, dim=0).item()
@@ -834,11 +822,6 @@ def eval_semantic(slam_model, dataset, final_params, final_variables, num_frames
         seen = radius > 0
 
         # Render Semantic and compute cosine similarity
-        # seman_rendervar = transformed_params2semrendervar_sparse(final_params, transformed_gaussians, seen)
-        # sparse_cam = set_camera_sparse(cam=curr_data['cam'], cls_ids=final_variables['seman_cls_ids'])
-        # rastered_seman, _, = SEMRenderer(raster_settings=sparse_cam)(**seman_rendervar)
-
-
         seman_rendervar = transformed_params2semrendervar(final_params, final_variables, transformed_gaussians, seen)
         rastered_seman, _, = SEMRenderer(raster_settings=curr_data['cam'])(**seman_rendervar)  # 133.H.W
 
@@ -894,8 +877,6 @@ def eval_semantic(slam_model, dataset, final_params, final_variables, num_frames
         reprocess_ids = reprocess_ids.detach().cpu().long().numpy()
         recolored_rastered_seman_rgb = apply_colormap(reprocess_ids, sem_colormap)
 
-
-
         # Plot the Ground Truth, Pseudo and Rasterized semantic RGB
         fig_title = "Time Step: {}".format(time_idx)
         plot_name = "%04d" % time_idx
@@ -915,8 +896,6 @@ def eval_semantic(slam_model, dataset, final_params, final_variables, num_frames
         colored_heatmap = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
         save_path = os.path.join(plot_dir, f"{plot_name}_prob_sofa.png")
         cv2.imwrite(save_path, colored_heatmap)
-
-        breakpoint()
 
         target_res = (256, 256)
         mode = 'nearest'
@@ -1064,9 +1043,6 @@ def eval_semantic_mp3d(slam_model, dataset, final_params, final_variables, num_f
             continue
 
         # Get current frame Gaussians
-        # transformed_gaussians = transform_to_frame(final_params, time_idx,
-        #                                            gaussians_grad=False,
-        #                                            camera_grad=False)
         transformed_gaussians = transform_to_frame(final_params, time_idx,
                                                    gaussians_grad=False,
                                                    camera_grad=False,
@@ -1085,10 +1061,6 @@ def eval_semantic_mp3d(slam_model, dataset, final_params, final_variables, num_f
         seen = radius > 0
 
         # Render Semantic and compute cosine similarity
-        # seman_rendervar = transformed_params2semrendervar_sparse(final_params, transformed_gaussians, seen)
-        # sparse_cam = set_camera_sparse(cam=curr_data['cam'], cls_ids=final_variables['seman_cls_ids'])
-        # rastered_seman, _, = SEMRenderer(raster_settings=sparse_cam)(**seman_rendervar)
-
         seman_rendervar = transformed_params2semrendervar(final_params, final_variables, transformed_gaussians,
                                                           seen)
         rastered_seman, _, = SEMRenderer(raster_settings=curr_data['cam'])(**seman_rendervar)  # 133.H.W
