@@ -21,6 +21,9 @@ bash scripts/installation/conda_env/build_sem.sh
 
 #### dense-channel-rasterization
 ```
+# clone from github
+git clone -b liyan/dev --single-branch https://github.com/lly00412/semantic-gaussians.git third_parties/channel_rasterization
+
 # go to the submodule directory
 cd ./third_parties/channel_rasterization/channel-rasterization/cuda_rasterizer
 
@@ -35,6 +38,9 @@ pip install .
 
 #### sparse-channel-rasterization
 ```
+# clone from github
+git clone -b hairong/sparse_ver --single-branch https://github.com/lly00412/semantic-gaussians.git third_parties/sparse_channel_rasterization
+
 # go to the submodule directory
 cd ./third_parties/sparse_channel_rasterizationn/sparse-channel-rasterizationncuda_rasterizer
 
